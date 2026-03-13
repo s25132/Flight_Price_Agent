@@ -4,18 +4,17 @@ import pandas as pd
 from autogluon.tabular import TabularPredictor
 
 
-def train_model(path):
+def train_model(path, experiment_name, target):
     df = pd.read_csv(path)
 
-    label = "price"
     model_dir = "/opt/airflow/data/models/autogluon"
 
     mlflow.set_tracking_uri(os.environ["MLFLOW_TRACKING_URI"])
-    mlflow.set_experiment("autogluon-regression-india")
+    mlflow.set_experiment(experiment_name)
 
     with mlflow.start_run() as run:
         predictor = TabularPredictor(
-            label=label,
+            label=target,
             path=model_dir,
             problem_type="regression",
             eval_metric="root_mean_squared_error",
@@ -28,6 +27,7 @@ def train_model(path):
         mlflow.log_param("problem_type", "regression")
         mlflow.log_param("eval_metric", "root_mean_squared_error")
         mlflow.log_param("presets", "medium_quality")
+        mlflow.log_param("target", target)
 
         return {
             "run_id": run.info.run_id,

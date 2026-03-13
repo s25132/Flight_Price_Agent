@@ -7,15 +7,13 @@ from autogluon.tabular import TabularPredictor
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
 
-def evaluate_model(path, train_result):
+def evaluate_model(path, train_result, experiment_name, target):
     run_id = train_result["run_id"]
     model_dir = train_result["model_dir"]
 
     df = pd.read_csv(path)
 
     predictor = TabularPredictor.load(model_dir)
-
-    target = "price"
 
     y_true = df[target]
     X = df.drop(columns=[target])
@@ -43,7 +41,7 @@ def evaluate_model(path, train_result):
     }).to_csv(predictions_path, index=False)
 
     mlflow.set_tracking_uri(os.environ["MLFLOW_TRACKING_URI"])
-    mlflow.set_experiment("autogluon-regression-india")
+    mlflow.set_experiment(experiment_name)
 
     with mlflow.start_run(run_id=run_id):
         mlflow.log_metrics(metrics)

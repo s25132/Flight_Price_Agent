@@ -12,9 +12,20 @@ from src.india.storage import upload_model
     dag_id="training_pipeline_india",
     start_date=datetime(2024, 1, 1),
     schedule=None,
-    catchup=False
+    catchup=False,
+    params={
+        "experiment_name": "india_autogluon_training",
+        "target": "price"
+    }
 )
 def training_pipeline():
+
+    @task
+    def get_params(**context):
+        return {
+            "experiment_name": context["params"]["experiment_name"],
+            "target": context["params"]["target"],
+        }
 
     @task
     def download():
@@ -25,22 +36,27 @@ def training_pipeline():
         return preprocess(path)
 
     @task
-    def train_task(path):
-        return train_model(path)
-
+    def train_task(path, config):
+        return train_model(
+            path=path,
+            experiment_name=config["experiment_name"],
+            target=config["target"],
+        )
 
     @task
-    def evaluate_task(path, train_result):
-        return evaluate_model(path, train_result)
+    def evaluate_task(path, train_result, config):
+        return evaluate_model(path, train_result, experiment_name=config["experiment_name"], target=config["target"])
 
     @task
     def upload_task(train_result):
         upload_model(train_result)
 
+    config = get_params()
+
     raw = download()
     processed = preprocess_task(raw)
-    train_result = train_task(processed)
-    evaluate_task(processed, train_result)
+    train_result = train_task(processed, config)
+    evaluate_task(processed, train_result, config)
     upload_task(train_result)
 
 
