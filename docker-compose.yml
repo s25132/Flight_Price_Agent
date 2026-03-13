@@ -84,7 +84,7 @@ services:
       mc alias set local http://minio:9000 minioadmin minioadmin &&
       mc mb -p local/data-lake || true &&
       mc mb -p local/mlflow-artifacts || true &&
-      if [ -d /seed/raw ]; then mc cp --recursive /seed/raw/. local/data-lake/raw/; fi &&
+      if [ -d /seed ]; then mc cp --recursive /seed/* local/data-lake/raw/; fi &&
       echo 'MinIO buckets and raw data initialized.'
       "
     volumes:
