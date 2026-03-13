@@ -1,0 +1,10 @@
+apache-airflow==3.1.7
+pandas
+numpy
+scikit-learn
+boto3
+mlflow
+autogluon.tabular
+python-dotenv
+
+cryptography<46.0.0

@@ -1,3 +1,47 @@
+x-airflow-common: &airflow-common
+  build:
+    context: .
+    dockerfile: Dockerfile.airflow
+  image: my-airflow:3.1.7-autogluon
+  environment: &airflow-common-env
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+    AIRFLOW__CORE__FERNET_KEY: ""
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_ALL_ADMINS: "True"
+    AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://airflow-api-server:8080/execution/
+    AIRFLOW__API_AUTH__JWT_SECRET: "supersekretny_jwt_123456789"
+    AIRFLOW__API__SECRET_KEY: "supersekretny_api_123456789"
+
+    MINIO_ENDPOINT: "http://minio:9000"
+    MINIO_ACCESS_KEY: "minioadmin"
+    MINIO_SECRET_KEY: "minioadmin"
+    MINIO_BUCKET: "data-lake"
+
+    MLFLOW_TRACKING_URI: "http://mlflow:5000"
+    MLFLOW_S3_ENDPOINT_URL: "http://minio:9000"
+    AWS_ACCESS_KEY_ID: "minioadmin"
+    AWS_SECRET_ACCESS_KEY: "minioadmin"
+
+    PYTHONPATH: "/opt/airflow:/opt/airflow/src"
+
+  volumes: &airflow-common-volumes
+    - ./dags:/opt/airflow/dags
+    - ./logs:/opt/airflow/logs
+    - ./plugins:/opt/airflow/plugins
+    - ./src:/opt/airflow/src
+    - ./data:/opt/airflow/data
+
+x-airflow-depends-on: &airflow-depends-on
+  postgres:
+    condition: service_healthy
+  minio-init:
+    condition: service_completed_successfully
+  airflow-init:
+    condition: service_completed_successfully
+  mlflow:
+    condition: service_started
+
 services:
   postgres:
     image: postgres:16
@@ -39,118 +83,66 @@ services:
       /bin/sh -c "
       mc alias set local http://minio:9000 minioadmin minioadmin &&
       mc mb -p local/data-lake || true &&
-      if [ -d /seed/raw ]; then mc cp --recursive /seed/raw/. local/data-lake/; fi &&
-      echo 'MinIO bucket and raw data initialized.'
+      mc mb -p local/mlflow-artifacts || true &&
+      if [ -d /seed/raw ]; then mc cp --recursive /seed/raw/. local/data-lake/raw/; fi &&
+      echo 'MinIO buckets and raw data initialized.'
       "
     volumes:
       - ./seed:/seed
 
-  airflow-init:
-    image: apache/airflow:3.1.7
+  mlflow:
+    build:
+      context: .
+      dockerfile: Dockerfile.mlflow
+    image: my-mlflow:latest
+    working_dir: /app
+    depends_on:
+      minio:
+        condition: service_healthy
+    command: >
+      mlflow server
+      --host 0.0.0.0
+      --port 5000
+      --backend-store-uri sqlite:///mlflow.db
+      --artifacts-destination s3://mlflow-artifacts
     environment:
-      AIRFLOW__CORE__EXECUTOR: LocalExecutor
-      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
-      AIRFLOW__CORE__FERNET_KEY: ""
-      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
-      AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_ALL_ADMINS: "True"
-      AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://airflow-api-server:8080/execution/
-      AIRFLOW__API_AUTH__JWT_SECRET: "supersekretny_jwt_123456789"
-      AIRFLOW__API__SECRET_KEY: "supersekretny_api_123456789"
-      MINIO_ENDPOINT: "http://minio:9000"
-      MINIO_ACCESS_KEY: "minioadmin"
-      MINIO_SECRET_KEY: "minioadmin"
-      MINIO_BUCKET: "data-lake"
+      AWS_ACCESS_KEY_ID: minioadmin
+      AWS_SECRET_ACCESS_KEY: minioadmin
+      MLFLOW_S3_ENDPOINT_URL: http://minio:9000
+    ports:
+      - "5000:5000"
     volumes:
-      - ./dags:/opt/airflow/dags
-      - ./logs:/opt/airflow/logs
-      - ./plugins:/opt/airflow/plugins
+      - mlflow_data:/app
+
+  airflow-init:
+    <<: *airflow-common
     depends_on:
       postgres:
         condition: service_healthy
       minio-init:
         condition: service_completed_successfully
+      mlflow:
+        condition: service_started
     command: airflow db migrate
 
   airflow-api-server:
-    image: apache/airflow:3.1.7
-    environment:
-      AIRFLOW__CORE__EXECUTOR: LocalExecutor
-      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
-      AIRFLOW__CORE__FERNET_KEY: ""
-      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
-      AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_ALL_ADMINS: "True"
-      AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://airflow-api-server:8080/execution/
-      AIRFLOW__API_AUTH__JWT_SECRET: "supersekretny_jwt_123456789"
-      AIRFLOW__API__SECRET_KEY: "supersekretny_api_123456789"
-      MINIO_ENDPOINT: "http://minio:9000"
-      MINIO_ACCESS_KEY: "minioadmin"
-      MINIO_SECRET_KEY: "minioadmin"
-      MINIO_BUCKET: "data-lake"
-    volumes:
-      - ./dags:/opt/airflow/dags
-      - ./logs:/opt/airflow/logs
-      - ./plugins:/opt/airflow/plugins
+    <<: *airflow-common
     ports:
       - "8080:8080"
-    depends_on:
-      postgres:
-        condition: service_healthy
-      airflow-init:
-        condition: service_completed_successfully
+    depends_on: *airflow-depends-on
     command: airflow api-server
 
   airflow-scheduler:
-    image: apache/airflow:3.1.7
-    environment:
-      AIRFLOW__CORE__EXECUTOR: LocalExecutor
-      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
-      AIRFLOW__CORE__FERNET_KEY: ""
-      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
-      AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_ALL_ADMINS: "True"
-      AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://airflow-api-server:8080/execution/
-      AIRFLOW__API_AUTH__JWT_SECRET: "supersekretny_jwt_123456789"
-      AIRFLOW__API__SECRET_KEY: "supersekretny_api_123456789"
-      MINIO_ENDPOINT: "http://minio:9000"
-      MINIO_ACCESS_KEY: "minioadmin"
-      MINIO_SECRET_KEY: "minioadmin"
-      MINIO_BUCKET: "data-lake"
-    volumes:
-      - ./dags:/opt/airflow/dags
-      - ./logs:/opt/airflow/logs
-      - ./plugins:/opt/airflow/plugins
-    depends_on:
-      postgres:
-        condition: service_healthy
-      airflow-init:
-        condition: service_completed_successfully
+    <<: *airflow-common
+    depends_on: *airflow-depends-on
     command: airflow scheduler
 
   airflow-dag-processor:
-    image: apache/airflow:3.1.7
-    environment:
-      AIRFLOW__CORE__EXECUTOR: LocalExecutor
-      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
-      AIRFLOW__CORE__FERNET_KEY: ""
-      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
-      AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_ALL_ADMINS: "True"
-      AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://airflow-api-server:8080/execution/
-      AIRFLOW__API_AUTH__JWT_SECRET: "supersekretny_jwt_123456789"
-      AIRFLOW__API__SECRET_KEY: "supersekretny_api_123456789"
-      MINIO_ENDPOINT: "http://minio:9000"
-      MINIO_ACCESS_KEY: "minioadmin"
-      MINIO_SECRET_KEY: "minioadmin"
-      MINIO_BUCKET: "data-lake"
-    volumes:
-      - ./dags:/opt/airflow/dags
-      - ./logs:/opt/airflow/logs
-      - ./plugins:/opt/airflow/plugins
-    depends_on:
-      postgres:
-        condition: service_healthy
-      airflow-init:
-        condition: service_completed_successfully
+    <<: *airflow-common
+    depends_on: *airflow-depends-on
     command: airflow dag-processor
 
 volumes:
   postgres_data:
   minio_data:
+  mlflow_data:
