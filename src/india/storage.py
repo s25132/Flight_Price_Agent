@@ -1,10 +1,11 @@
 import os
 import boto3
+import shutil
+import zipfile
 
 
 def upload_model(train_result):
 
-    run_id = train_result["run_id"]
     model_dir = train_result["model_dir"]
 
     endpoint = os.environ["MINIO_ENDPOINT"]
@@ -17,27 +18,51 @@ def upload_model(train_result):
         aws_secret_access_key=os.environ["MINIO_SECRET_KEY"],
     )
 
-    latest_prefix = f"india_models/latest/"
+    latest_prefix = "india/models/latest/"
 
+    # usuwanie poprzednich modeli z MinIO
     paginator = s3.get_paginator("list_objects_v2")
     for page in paginator.paginate(Bucket=bucket, Prefix=latest_prefix):
         for obj in page.get("Contents", []):
             s3.delete_object(Bucket=bucket, Key=obj["Key"])
 
-    for root, _, files in os.walk(model_dir):
+    # -----------------------------
+    # 1. ZIP całego katalogu modelu
+    # -----------------------------
+    zip_path = os.path.join(model_dir, "model.zip")
 
-        for f in files:
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
+        for root, _, files in os.walk(model_dir):
+            for f in files:
+                file_path = os.path.join(root, f)
 
-            local_file = os.path.join(root,f)
+                # nie pakuj samego zipa
+                if file_path == zip_path:
+                    continue
 
-            # archiwum runów
-            run_key = f"india_models/run/{run_id}/" + os.path.relpath(local_file, model_dir)
+                arcname = os.path.relpath(file_path, model_dir)
+                zipf.write(file_path, arcname)
 
-            # aktualny model
-            latest_key = latest_prefix + os.path.relpath(local_file, model_dir)
+    print(f"Model zipped -> {zip_path}")
 
-            s3.upload_file(local_file, bucket, run_key)
-            s3.upload_file(local_file, bucket, latest_key)
+    # -----------------------------
+    # 2. Upload ZIP do MinIO
+    # -----------------------------
+    latest_key = latest_prefix + "model.zip"
 
-            print(f"Uploaded {local_file} -> {run_key}")
-            print(f"Updated latest -> {latest_key}")
+    s3.upload_file(zip_path, bucket, latest_key)
+
+    print(f"Uploaded zipped model -> {latest_key}")
+
+    # -----------------------------
+    # 3. Usunięcie zawartości model_dir
+    # -----------------------------
+    for item in os.listdir(model_dir):
+        item_path = os.path.join(model_dir, item)
+
+        if os.path.isfile(item_path):
+            os.remove(item_path)
+        else:
+            shutil.rmtree(item_path)
+
+    print(f"Cleaned local directory -> {model_dir}")

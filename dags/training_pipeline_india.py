@@ -13,6 +13,7 @@ from src.india.storage import upload_model
     start_date=datetime(2024, 1, 1),
     schedule=None,
     catchup=False,
+    tags=["ml", "minio", "model", "training", "india"],
     params={
         "experiment_name": "india_autogluon_training",
         "target": "price"

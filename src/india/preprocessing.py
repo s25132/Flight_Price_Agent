@@ -8,7 +8,7 @@ def preprocess(path):
 
     df = df.dropna()
 
-    out_path = "/opt/airflow/data/processed/train_processed.csv"
+    out_path = "/opt/airflow/data/processed/india/train_processed.csv"
 
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
 
