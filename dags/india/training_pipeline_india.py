@@ -6,6 +6,7 @@ from src.india.preprocessing import preprocess
 from src.india.training import train_model 
 from src.india.evaluation import evaluate_model
 from src.india.storage import upload_model
+from src.india.split_data import split_data
 
 
 @dag(
@@ -35,6 +36,10 @@ def training_pipeline():
     @task
     def preprocess_task(path):
         return preprocess(path)
+    
+    @task(multiple_outputs=True)
+    def split_task(path):
+        return split_data(path)
 
     @task
     def train_task(path, config):
@@ -56,10 +61,12 @@ def training_pipeline():
 
     raw = download()
     processed = preprocess_task(raw)
-    # tu powinien być task split na train i test TODO
-    train_result = train_task(processed, config)    # tu powinien być train zamiast processed TODO
-    evaluate_task(processed, train_result, config)  # tu powinien być test zamiast processed TODO
-    upload_task(train_result)
+    split_result = split_task(processed)
 
+    train_result = train_task(split_result["train_path"], config)
+    evaluation_result = evaluate_task(split_result["test_path"], train_result, config)
+    upload = upload_task(train_result)
+
+    config >> raw >> processed >> split_result >> train_result >> [evaluation_result, upload]
 
 dag = training_pipeline()
