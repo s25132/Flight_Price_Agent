@@ -56,8 +56,9 @@ def training_pipeline():
 
     raw = download()
     processed = preprocess_task(raw)
-    train_result = train_task(processed, config)
-    evaluate_task(processed, train_result, config)
+    # tu powinien być task split na train i test TODO
+    train_result = train_task(processed, config)    # tu powinien być train zamiast processed TODO
+    evaluate_task(processed, train_result, config)  # tu powinien być test zamiast processed TODO
     upload_task(train_result)
 
 
